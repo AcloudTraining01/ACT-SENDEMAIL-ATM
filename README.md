@@ -62,3 +62,78 @@ try {
     Write-Host "Failed to send email" -ForegroundColor Red
     Write-Host $_.Exception.Message
 }
+
+
+
+
+
+
+
+
+
+
+trigger: none
+
+parameters:
+- name: recipient
+  type: string
+  default: "info@acloudtraining.com"
+
+- name: subject
+  type: string
+  default: "Pipeline Notification"
+
+- name: message
+  type: string
+  default: "Pipeline executed successfully"
+
+variables:
+  keyVaultName: "your-keyvault-name"
+
+pool:
+  vmImage: 'ubuntu-latest'
+
+steps:
+
+# 🔐 Step 1: Fetch secrets from Key Vault
+- task: AzureKeyVault@2
+  displayName: "Fetch secrets from Key Vault"
+  inputs:
+    azureSubscription: "your-service-connection-name"
+    KeyVaultName: "$(keyVaultName)"
+    SecretsFilter: "acs-endpoint,acs-key,sender-email"
+    RunAsPreJob: true
+
+# 📧 Step 2: Send Email via ACS
+- task: Bash@3
+  displayName: "Send Email via ACS"
+  inputs:
+    targetType: 'inline'
+    script: |
+
+      echo "Building payload dynamically..."
+
+      payload=$(jq -n \
+        --arg to "${{ parameters.recipient }}" \
+        --arg subject "${{ parameters.subject }}" \
+        --arg body "${{ parameters.message }}" \
+        --arg sender "$(sender-email)" \
+        '{
+          senderAddress: $sender,
+          content: {
+            subject: $subject,
+            plainText: $body
+          },
+          recipients: {
+            to: [{ address: $to }]
+          }
+        }')
+
+      echo "Sending email via Azure Communication Services..."
+
+      curl -X POST "$(acs-endpoint)/emails:send?api-version=2023-03-31" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: $(acs-key)" \
+        -d "$payload"
+
+      echo "Email request sent"
